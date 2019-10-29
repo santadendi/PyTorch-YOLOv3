@@ -13,6 +13,18 @@ import argparse
 import tqdm
 
 import torch
+import albumentations as albu
+
+from models import Darknet
+from utils.utils import (
+    xywh2xyxy,
+    non_max_suppression,
+    get_batch_statistics,
+    ap_per_class,
+    load_classes,
+)
+from utils.datasets import ListDataset
+from utils.parse_config import parse_data_config
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision import transforms
@@ -20,11 +32,22 @@ from torch.autograd import Variable
 import torch.optim as optim
 
 
-def evaluate(model, path, iou_thres, conf_thres, nms_thres, img_size, batch_size):
+def evaluate(
+    model,
+    path: str,
+    transform,
+    iou_thres: float = 0.5,
+    conf_thres: float = 0.5,
+    nms_thres: float = 0.5,
+    img_size: int = 416,
+    batch_size: int = 8,
+):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
 
-    # Get dataloader
-    dataset = ListDataset(path, img_size=img_size, augment=False, multiscale=False)
+    dataset = ListDataset(
+        list_path=path, transform=transform, img_size=img_size, max_objects=None
+    )
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, shuffle=False, num_workers=1, collate_fn=dataset.collate_fn
     )
@@ -76,6 +99,10 @@ if __name__ == "__main__":
     data_config = parse_data_config(opt.data_config)
     valid_path = data_config["valid"]
     class_names = load_classes(data_config["names"])
+    test_transform = albu.Compose(
+        [albu.Resize(height=opt.img_size, width=opt.img_size, p=1)],
+        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
+    )
 
     # Initiate model
     model = Darknet(opt.model_def).to(device)
@@ -89,8 +116,9 @@ if __name__ == "__main__":
     print("Compute mAP...")
 
     precision, recall, AP, f1, ap_class = evaluate(
-        model,
+        model=model,
         path=valid_path,
+        transform=test_transform,
         iou_thres=opt.iou_thres,
         conf_thres=opt.conf_thres,
         nms_thres=opt.nms_thres,

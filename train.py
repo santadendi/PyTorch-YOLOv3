@@ -75,8 +75,26 @@ if __name__ == "__main__":
         else:
             model.load_darknet_weights(opt.pretrained_weights)
 
-    # Get dataloader
-    dataset = ListDataset(train_path, augment=True, multiscale=opt.multiscale_training)
+    test_transform = albu.Compose(
+        [
+            albu.Resize(height=opt.img_size, width=opt.img_size, p=1),
+        ],
+        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
+    )
+    train_transform = albu.Compose(
+        [
+            albu.HorizontalFlip(p=0),
+            albu.Resize(height=opt.img_size, width=opt.img_size, p=1),
+        ],
+        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
+    )
+    dataset = ListDataset(
+        list_path=train_path,
+        transform=train_transform,
+        img_size=opt.img_size,
+        max_objects=None,
+        logger=logger,
+    )
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=opt.batch_size,
@@ -180,8 +198,9 @@ if __name__ == "__main__":
 
             """Evaluate the model on the validation set"""
             precision, recall, AP, f1, ap_class = evaluate(
-                model,
+                model=model,
                 path=valid_path,
+                transform=test_transform,
                 iou_thres=0.5,
                 conf_thres=0.5,
                 nms_thres=0.5,

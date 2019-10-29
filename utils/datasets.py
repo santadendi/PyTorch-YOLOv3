@@ -30,10 +30,43 @@ def resize(image, size):
     return image
 
 
-def random_resize(images, min_size=288, max_size=448):
-    new_size = random.sample(list(range(min_size, max_size + 1, 32)), 1)[0]
-    images = F.interpolate(images, size=new_size, mode="nearest")
-    return images
+def limit_bboxes(x_min, y_min, x_max, y_max, img_w, img_h):
+    x_min = np.clip(x_min, a_min=1, a_max=img_w - 1)
+    y_min = np.clip(y_min, a_min=1, a_max=img_h - 1)
+    x_max = np.clip(x_max, a_min=1, a_max=img_w - 1)
+    y_max = np.clip(y_max, a_min=1, a_max=img_h - 1)
+    return x_min, y_min, x_max, y_max
+
+
+def yolo_to_pascal_format(yolo_bbox, img_h, img_w):
+    x_central, y_central, w, h = yolo_bbox.T
+    x_min = (x_central - w / 2) * img_w
+    y_min = (y_central - h / 2) * img_h
+    x_max = (x_central + w / 2) * img_w
+    y_max = (y_central + h / 2) * img_h
+
+    x_min, y_min, x_max, y_max = limit_bboxes(
+        x_min, y_min, x_max, y_max, img_w=img_w, img_h=img_h
+    )
+
+    pascal_format_bbox = np.vstack((x_min, y_min, x_max, y_max)).T
+    return pascal_format_bbox
+
+
+def pascal_to_yolo_format(pascal_bbox, img_h, img_w):
+    x_min, y_min, x_max, y_max = pascal_bbox.T
+
+    x_min, y_min, x_max, y_max = limit_bboxes(
+        x_min, y_min, x_max, y_max, img_w=img_w, img_h=img_h
+    )
+
+    x_central = (x_min + x_max) / 2 / img_w
+    y_central = (y_min + y_max) / 2 / img_h
+    w = (x_max - x_min) / img_w
+    h = (y_max - y_min) / img_h
+
+    yolo_format_bbox = np.vstack((x_central, y_central, w, h)).T
+    return yolo_format_bbox
 
 
 class ImageFolder(Dataset):
@@ -57,7 +90,15 @@ class ImageFolder(Dataset):
 
 
 class ListDataset(Dataset):
-    def __init__(self, list_path, img_size=416, augment=True, multiscale=True, normalized_labels=True):
+    def __init__(
+        self,
+        list_path: str,
+        transform,
+        img_size: int = 416,
+        max_objects: Optional[int] = None,
+        logger=None,
+    ):
+
         with open(list_path, "r") as file:
             self.img_files = file.readlines()
 
@@ -65,87 +106,72 @@ class ListDataset(Dataset):
             path.replace("images", "labels").replace(".png", ".txt").replace(".jpg", ".txt")
             for path in self.img_files
         ]
+        self.transform = transform
         self.img_size = img_size
-        self.max_objects = 100
-        self.augment = augment
-        self.multiscale = multiscale
-        self.normalized_labels = normalized_labels
-        self.min_size = self.img_size - 3 * 32
-        self.max_size = self.img_size + 3 * 32
-        self.batch_count = 0
+        self.logger = logger
+        self.max_objects = max_objects
+
+    def __len__(self) -> int:
+        if self.max_objects is None:
+            return len(self.img_files)
+
+        return self.max_objects
 
     def __getitem__(self, index):
-
-        # ---------
-        #  Image
-        # ---------
-
         img_path = self.img_files[index % len(self.img_files)].rstrip()
-
-        # Extract image as PyTorch tensor
-        img = transforms.ToTensor()(Image.open(img_path).convert('RGB'))
-
-        # Handle images with less than three channels
-        if len(img.shape) != 3:
-            img = img.unsqueeze(0)
-            img = img.expand((3, img.shape[1:]))
-
-        _, h, w = img.shape
-        h_factor, w_factor = (h, w) if self.normalized_labels else (1, 1)
-        # Pad to square resolution
-        img, pad = pad_to_square(img, 0)
-        _, padded_h, padded_w = img.shape
-
-        # ---------
-        #  Label
-        # ---------
+        img = np.array(Image.open(img_path).convert("RGB"))
+        img_height, img_width, _ = img.shape
 
         label_path = self.label_files[index % len(self.img_files)].rstrip()
-
         targets = None
+        need_resize_image = True
         if os.path.exists(label_path):
-            boxes = torch.from_numpy(np.loadtxt(label_path).reshape(-1, 5))
-            # Extract coordinates for unpadded + unscaled image
-            x1 = w_factor * (boxes[:, 1] - boxes[:, 3] / 2)
-            y1 = h_factor * (boxes[:, 2] - boxes[:, 4] / 2)
-            x2 = w_factor * (boxes[:, 1] + boxes[:, 3] / 2)
-            y2 = h_factor * (boxes[:, 2] + boxes[:, 4] / 2)
-            # Adjust for added padding
-            x1 += pad[0]
-            y1 += pad[2]
-            x2 += pad[1]
-            y2 += pad[3]
-            # Returns (x, y, w, h)
-            boxes[:, 1] = ((x1 + x2) / 2) / padded_w
-            boxes[:, 2] = ((y1 + y2) / 2) / padded_h
-            boxes[:, 3] *= w_factor / padded_w
-            boxes[:, 4] *= h_factor / padded_h
+            label_data = np.loadtxt(label_path).reshape(-1, 5)
+            category_ids = label_data[:, 0]
+            bboxes = label_data[:, 1:]
+            width_arr = bboxes[:, 2]
+            height_arr = bboxes[:, 3]
 
-            targets = torch.zeros((len(boxes), 6))
-            targets[:, 1:] = boxes
+            """Check that we do not have bbox with zero height or width"""
+            if all(width_arr > 0) and all(height_arr > 0):
+                pascal_format_bboxes = yolo_to_pascal_format(
+                    yolo_bbox=bboxes, img_h=img_height, img_w=img_width
+                )
 
-        # Apply augmentations
-        if self.augment:
-            if np.random.random() < 0.5:
-                img, targets = horisontal_flip(img, targets)
+                augmented = self.transform(
+                    image=img,
+                    bboxes=pascal_format_bboxes.tolist(),
+                    category_id=category_ids.tolist(),
+                )
+
+                img = transforms.ToTensor()(augmented["image"])
+                need_resize_image = False
+
+                targets = np.zeros((label_data.shape[0], 6))
+                targets[:, 2:] = pascal_to_yolo_format(
+                    pascal_bbox=np.array(augmented["bboxes"]),
+                    img_h=img_height,
+                    img_w=img_width,
+                )
+                targets[:, 1] = np.array(augmented["category_id"])
+                targets = torch.from_numpy(targets).type_as(img)
+
+        if need_resize_image:
+            img = transforms.ToTensor()(img)
+            img = resize(img, self.img_size)
 
         return img_path, img, targets
 
     def collate_fn(self, batch):
         paths, imgs, targets = list(zip(*batch))
-        # Remove empty placeholder targets
+
+        """Remove empty placeholder targets"""
         targets = [boxes for boxes in targets if boxes is not None]
-        # Add sample index to targets
+
+        """Add sample index to targets"""
         for i, boxes in enumerate(targets):
             boxes[:, 0] = i
-        targets = torch.cat(targets, 0)
-        # Selects new image size every tenth batch
-        if self.multiscale and self.batch_count % 10 == 0:
-            self.img_size = random.choice(range(self.min_size, self.max_size + 1, 32))
-        # Resize images to input shape
-        imgs = torch.stack([resize(img, self.img_size) for img in imgs])
-        self.batch_count += 1
-        return paths, imgs, targets
 
-    def __len__(self):
-        return len(self.img_files)
+        targets = torch.cat(targets, 0)
+        imgs = torch.stack([img for img in imgs])
+        return paths, imgs, targets
