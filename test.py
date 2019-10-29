@@ -53,7 +53,7 @@ def evaluate(
         targets[:, 2:] = xywh2xyxy(targets[:, 2:])
         targets[:, 2:] *= img_size
 
-        imgs = Variable(imgs.type(Tensor), requires_grad=False)
+        imgs = imgs.requires_grad_(False).to(device)
 
         with torch.no_grad():
             outputs = model(imgs)
