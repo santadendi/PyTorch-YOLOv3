@@ -92,6 +92,7 @@ if __name__ == "__main__":
     train_path = data_config["train"]
     valid_path = data_config["valid"]
     class_names = load_classes(data_config["names"])
+    trained_models_dir = "trained_models/" + date_str + "/"
 
     """Initiate model"""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -259,4 +260,7 @@ if __name__ == "__main__":
             logger.info(f"---- mAP {AP.mean()}")
 
         if epoch % opt.checkpoint_interval == 0:
-            torch.save(model.state_dict(), f"checkpoints/yolov3_ckpt_%d.pth" % epoch)
+            if not os.path.isdir(trained_models_dir):
+                os.mkdir(trained_models_dir)
+            save_path = trained_models_dir + "/" + "yolov3_ckpt_{}.pth".format(epoch)
+            torch.save(model.state_dict(), save_path)
