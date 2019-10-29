@@ -13,36 +13,68 @@ from utils.utils import load_classes, weights_init_normal
 from utils.datasets import ListDataset
 from utils.parse_config import parse_data_config
 from test import evaluate
-
 from terminaltables import AsciiTable
-
-import os
-import sys
-import time
-import datetime
-import argparse
-
-import torch
 from torch.utils.data import DataLoader
-from torchvision import datasets
-from torchvision import transforms
-from torch.autograd import Variable
-import torch.optim as optim
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
-    parser.add_argument("--batch_size", type=int, default=8, help="size of each image batch")
-    parser.add_argument("--gradient_accumulations", type=int, default=2, help="number of gradient accums before step")
-    parser.add_argument("--model_def", type=str, default="config/yolov3.cfg", help="path to model definition file")
-    parser.add_argument("--data_config", type=str, default="config/coco.data", help="path to data config file")
-    parser.add_argument("--pretrained_weights", type=str, help="if specified starts from checkpoint model")
-    parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
-    parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")
-    parser.add_argument("--checkpoint_interval", type=int, default=1, help="interval between saving model weights")
-    parser.add_argument("--evaluation_interval", type=int, default=1, help="interval evaluations on validation set")
-    parser.add_argument("--compute_map", default=False, help="if True computes mAP every tenth batch")
-    parser.add_argument("--multiscale_training", default=True, help="allow for multi-scale training")
+    parser.add_argument("--epochs", type=int, default=10, help="number of epochs")
+    parser.add_argument(
+        "--batch_size", type=int, default=12, help="size of each image batch"
+    )
+    parser.add_argument(
+        "--gradient_accumulations",
+        type=int,
+        default=2,
+        help="number of gradient accums before step",
+    )
+    parser.add_argument(
+        "--model_def",
+        type=str,
+        default="config/yolov3.cfg",
+        help="path to model definition file",
+    )
+    parser.add_argument(
+        "--data_config",
+        type=str,
+        default="config/coco.data",
+        help="path to data config file",
+    )
+    parser.add_argument(
+        "--pretrained_weights",
+        type=str,
+        help="if specified starts from checkpoint model",
+    )
+    parser.add_argument(
+        "--n_cpu",
+        type=int,
+        default=4,
+        help="number of cpu threads to use during batch generation",
+    )
+    parser.add_argument(
+        "--img_size", type=int, default=416, help="size of each image dimension"
+    )
+    parser.add_argument(
+        "--checkpoint_interval",
+        type=int,
+        default=1,
+        help="interval between saving model weights",
+    )
+    parser.add_argument(
+        "--evaluation_interval",
+        type=int,
+        default=1,
+        help="interval evaluations on validation set",
+    )
+    parser.add_argument(
+        "--print_every", type=int, default=200, help="metric printing interval"
+    )
+    parser.add_argument(
+        "--compute_map", default=False, help="if True computes mAP every tenth batch"
+    )
+    parser.add_argument(
+        "--multiscale_training", default=True, help="allow for multi-scale training"
+    )
     opt = parser.parse_args()
     print(opt)
 
@@ -55,21 +87,20 @@ if __name__ == "__main__":
     log_save_path = "logs/" + log_filename
     logger = create_logger(log_save_path=log_save_path)
 
-    os.makedirs("output", exist_ok=True)
-    os.makedirs("checkpoints", exist_ok=True)
-
-    # Get data configuration
-    data_config = parse_data_config(opt.data_config)
+    """Get data configuration"""
+    data_config = parse_data_config(path=opt.data_config)
     train_path = data_config["train"]
     valid_path = data_config["valid"]
     class_names = load_classes(data_config["names"])
 
-    # Initiate model
+    """Initiate model"""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Darknet(opt.model_def).to(device)
     model.apply(weights_init_normal)
 
-    # If specified we start from checkpoint
+    """If specified we start from checkpoint"""
     if opt.pretrained_weights:
+        print("load pretrained weights")
         if opt.pretrained_weights.endswith(".pth"):
             model.load_state_dict(torch.load(opt.pretrained_weights))
         else:
@@ -122,6 +153,9 @@ if __name__ == "__main__":
         "conf_obj",
         "conf_noobj",
     ]
+    formats = {m: "%.6f" for m in metrics}
+    formats["grid_size"] = "%2d"
+    formats["cls_acc"] = "%.2f%%"
 
     for epoch in range(opt.epochs):
         model.train()
@@ -135,8 +169,10 @@ if __name__ == "__main__":
             loss, outputs = model(imgs, targets)
             loss.backward()
 
+            model.seen += imgs.size(0)
+
             if batches_done % opt.gradient_accumulations:
-                # Accumulates gradient before each step
+                """Accumulates gradient before each step"""
                 optimizer.step()
                 optimizer.zero_grad()
 
@@ -160,15 +196,13 @@ if __name__ == "__main__":
                     ]
                 ]
 
-            metric_table = [["Metrics", *[f"YOLO Layer {i}" for i in range(len(model.yolo_layers))]]]
-
-            # Log metrics at each YOLO layer
-            for i, metric in enumerate(metrics):
-                formats = {m: "%.6f" for m in metrics}
-                formats["grid_size"] = "%2d"
-                formats["cls_acc"] = "%.2f%%"
-                row_metrics = [formats[metric] % yolo.metrics.get(metric, 0) for yolo in model.yolo_layers]
-                metric_table += [[metric, *row_metrics]]
+                """Log metrics at each YOLO layer"""
+                for i, metric in enumerate(metrics):
+                    row_metrics = [
+                        formats[metric] % yolo.metrics.get(metric, 0)
+                        for yolo in model.yolo_layers
+                    ]
+                    metric_table += [[metric, *row_metrics]]
 
                     if tensorboard_logger:
                         tensorboard_log_train(
@@ -217,7 +251,7 @@ if __name__ == "__main__":
                 tag_value_pairs=evaluation_metrics, step=epoch
             )
 
-            # Print class APs and mAP
+            """Print class APs and mAP"""
             ap_table = [["Index", "Class name", "AP"]]
             for i, c in enumerate(ap_class):
                 ap_table += [[c, class_names[c], "%.5f" % AP[i]]]

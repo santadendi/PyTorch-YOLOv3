@@ -19,7 +19,12 @@ class Logger(object):
 
     def list_of_scalars_summary(self, tag_value_pairs: [], step: int):
         """Log scalar variables."""
-        summary = tf.Summary(value=[tf.Summary.Value(tag=tag, simple_value=value) for tag, value in tag_value_pairs])
+        summary = tf.Summary(
+            value=[
+                tf.Summary.Value(tag=tag, simple_value=value)
+                for tag, value in tag_value_pairs
+            ]
+        )
         self.writer.add_summary(summary, step)
 
 
@@ -31,13 +36,13 @@ def create_logger(log_save_path: str):
         log_save_path (str): path to save the log files
 
     """
-    format = '%(asctime)s %(levelname)s %(message)s'
-    name = 'main_logger'
+    format = "%(asctime)s %(levelname)s %(message)s"
+    name = "main_logger"
 
     logger = logging.getLogger(name)
     formatter = logging.Formatter(format)
 
-    file_handler = logging.FileHandler(log_save_path, mode='w')
+    file_handler = logging.FileHandler(log_save_path, mode="w")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
