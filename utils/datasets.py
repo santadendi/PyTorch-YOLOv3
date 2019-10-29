@@ -1,28 +1,16 @@
 import glob
-import random
 import os
-import sys
 import numpy as np
-from PIL import Image
 import torch
 import torch.nn.functional as F
-
-from utils.augmentations import horisontal_flip
-from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
+from PIL import Image
+from torch.utils.data import Dataset
+from PIL import ImageFile
+from typing import Optional
 
-def pad_to_square(img, pad_value):
-    c, h, w = img.shape
-    dim_diff = np.abs(h - w)
-    # (upper / left) padding and (lower / right) padding
-    pad1, pad2 = dim_diff // 2, dim_diff - dim_diff // 2
-    # Determine padding
-    pad = (0, 0, pad1, pad2) if h <= w else (pad1, pad2, 0, 0)
-    # Add padding
-    img = F.pad(img, pad, "constant", value=pad_value)
-
-    return img, pad
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def resize(image, size):
@@ -70,17 +58,14 @@ def pascal_to_yolo_format(pascal_bbox, img_h, img_w):
 
 
 class ImageFolder(Dataset):
-    def __init__(self, folder_path, img_size=416):
+    def __init__(self, folder_path: str, img_size: int = 416):
         self.files = sorted(glob.glob("%s/*.*" % folder_path))
         self.img_size = img_size
 
     def __getitem__(self, index):
         img_path = self.files[index % len(self.files)]
-        # Extract image as PyTorch tensor
+
         img = transforms.ToTensor()(Image.open(img_path))
-        # Pad to square resolution
-        img, _ = pad_to_square(img, 0)
-        # Resize
         img = resize(img, self.img_size)
 
         return img_path, img
@@ -91,12 +76,12 @@ class ImageFolder(Dataset):
 
 class ListDataset(Dataset):
     def __init__(
-        self,
-        list_path: str,
-        transform,
-        img_size: int = 416,
-        max_objects: Optional[int] = None,
-        logger=None,
+            self,
+            list_path: str,
+            transform,
+            img_size: int = 416,
+            max_objects: Optional[int] = None,
+            logger=None,
     ):
 
         with open(list_path, "r") as file:
@@ -104,8 +89,8 @@ class ListDataset(Dataset):
 
         self.label_files = [
             path.replace("images", "labels")
-            .replace(".png", ".txt")
-            .replace(".jpg", ".txt")
+                .replace(".png", ".txt")
+                .replace(".jpg", ".txt")
             for path in self.img_files
         ]
         self.transform = transform
