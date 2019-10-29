@@ -1,10 +1,17 @@
 from __future__ import division
 
-from models import *
-from utils.logger import *
-from utils.utils import *
-from utils.datasets import *
-from utils.parse_config import *
+import os
+import time
+import datetime
+import argparse
+import torch
+import albumentations as albu
+
+from models import Darknet
+from utils.logger import create_logger, Logger, tensorboard_log_train
+from utils.utils import load_classes, weights_init_normal
+from utils.datasets import ListDataset
+from utils.parse_config import parse_data_config
 from test import evaluate
 
 from terminaltables import AsciiTable
@@ -39,9 +46,14 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     print(opt)
 
-    logger = Logger("logs")
+    for dir_name in ["output", "logs", "trained_models", "tensorboard_logs"]:
+        os.makedirs(dir_name, exist_ok=True)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tensorboard_logger = Logger("tensorboard_logs")
+    date_str = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    log_filename = date_str + "_train_logs.log"
+    log_save_path = "logs/" + log_filename
+    logger = create_logger(log_save_path=log_save_path)
 
     os.makedirs("output", exist_ok=True)
     os.makedirs("checkpoints", exist_ok=True)
@@ -110,11 +122,25 @@ if __name__ == "__main__":
                 optimizer.step()
                 optimizer.zero_grad()
 
-            # ----------------
-            #   Log progress
-            # ----------------
+            """
+            ----------------
+               Log process
+            ----------------
+            """
+            if batch_i % opt.print_every == 0:
+                log_str = "\n---- [Epoch %d/%d, Batch %d/%d] ----" % (
+                    epoch,
+                    opt.epochs,
+                    batch_i,
+                    len(dataloader),
+                )
 
-            log_str = "\n---- [Epoch %d/%d, Batch %d/%d] ----\n" % (epoch, opt.epochs, batch_i, len(dataloader))
+                metric_table = [
+                    [
+                        "Metrics",
+                        *[f"YOLO Layer {i}" for i in range(len(model.yolo_layers))],
+                    ]
+                ]
 
             metric_table = [["Metrics", *[f"YOLO Layer {i}" for i in range(len(model.yolo_layers))]]]
 
@@ -126,30 +152,33 @@ if __name__ == "__main__":
                 row_metrics = [formats[metric] % yolo.metrics.get(metric, 0) for yolo in model.yolo_layers]
                 metric_table += [[metric, *row_metrics]]
 
-                # Tensorboard logging
-                tensorboard_log = []
-                for j, yolo in enumerate(model.yolo_layers):
-                    for name, metric in yolo.metrics.items():
-                        if name != "grid_size":
-                            tensorboard_log += [(f"{name}_{j+1}", metric)]
-                tensorboard_log += [("loss", loss.item())]
-                logger.list_of_scalars_summary(tensorboard_log, batches_done)
+                    if tensorboard_logger:
+                        tensorboard_log_train(
+                            model=model,
+                            loss=loss,
+                            batches_done=batches_done,
+                            logger=tensorboard_logger,
+                        )
 
-            log_str += AsciiTable(metric_table).table
-            log_str += f"\nTotal loss {loss.item()}"
+                metric_table_str = AsciiTable(metric_table).table
+                log_str += f"\nTotal loss {loss.item()}"
 
-            # Determine approximate time left for epoch
-            epoch_batches_left = len(dataloader) - (batch_i + 1)
-            time_left = datetime.timedelta(seconds=epoch_batches_left * (time.time() - start_time) / (batch_i + 1))
-            log_str += f"\n---- ETA {time_left}"
+                """Determine approximate time left for epoch"""
+                epoch_batches_left = len(dataloader) - (batch_i + 1)
+                time_left = datetime.timedelta(
+                    seconds=epoch_batches_left
+                    * (time.time() - start_time)
+                    / (batch_i + 1)
+                )
+                log_str += f"\n---- ETA {time_left}\n"
 
-            print(log_str)
-
-            model.seen += imgs.size(0)
+                logger.info(log_str)
+                print(metric_table_str)
 
         if epoch % opt.evaluation_interval == 0:
-            print("\n---- Evaluating Model ----")
-            # Evaluate the model on the validation set
+            logger.info("\n---- Evaluating Model ----")
+
+            """Evaluate the model on the validation set"""
             precision, recall, AP, f1, ap_class = evaluate(
                 model,
                 path=valid_path,
@@ -165,14 +194,16 @@ if __name__ == "__main__":
                 ("val_mAP", AP.mean()),
                 ("val_f1", f1.mean()),
             ]
-            logger.list_of_scalars_summary(evaluation_metrics, epoch)
+            tensorboard_logger.list_of_scalars_summary(
+                tag_value_pairs=evaluation_metrics, step=epoch
+            )
 
             # Print class APs and mAP
             ap_table = [["Index", "Class name", "AP"]]
             for i, c in enumerate(ap_class):
                 ap_table += [[c, class_names[c], "%.5f" % AP[i]]]
-            print(AsciiTable(ap_table).table)
-            print(f"---- mAP {AP.mean()}")
+            logger.info(AsciiTable(ap_table).table)
+            logger.info(f"---- mAP {AP.mean()}")
 
         if epoch % opt.checkpoint_interval == 0:
             torch.save(model.state_dict(), f"checkpoints/yolov3_ckpt_%d.pth" % epoch)
