@@ -33,7 +33,7 @@ def evaluate(
     model.eval()
 
     dataset = ListDataset(
-        list_path=path, transform=transform, img_size=img_size, max_objects=None
+        list_path=path, transform=transform, img_size=img_size, num_samples=None
     )
     dataloader = torch.utils.data.DataLoader(
         dataset,

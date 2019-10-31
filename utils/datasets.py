@@ -4,11 +4,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as transforms
+import albumentations as albu
+import cv2
 
 from PIL import Image
 from torch.utils.data import Dataset
 from PIL import ImageFile
 from typing import Optional
+from utils.utils import yolo_to_pascal_format, pascal_to_yolo_format
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -18,43 +21,32 @@ def resize(image, size):
     return image
 
 
-def limit_bboxes(x_min, y_min, x_max, y_max, img_w, img_h):
-    x_min = np.clip(x_min, a_min=1, a_max=img_w - 1)
-    y_min = np.clip(y_min, a_min=1, a_max=img_h - 1)
-    x_max = np.clip(x_max, a_min=1, a_max=img_w - 1)
-    y_max = np.clip(y_max, a_min=1, a_max=img_h - 1)
-    return x_min, y_min, x_max, y_max
-
-
-def yolo_to_pascal_format(yolo_bbox, img_h, img_w):
-    x_central, y_central, w, h = yolo_bbox.T
-    x_min = (x_central - w / 2) * img_w
-    y_min = (y_central - h / 2) * img_h
-    x_max = (x_central + w / 2) * img_w
-    y_max = (y_central + h / 2) * img_h
-
-    x_min, y_min, x_max, y_max = limit_bboxes(
-        x_min, y_min, x_max, y_max, img_w=img_w, img_h=img_h
+def get_transform(img_size):
+    """Initializes and returns data transformation pipeline"""
+    test_transform = albu.Compose(
+        [albu.Resize(height=img_size, width=img_size, p=1), albu.Normalize(p=1)],
+        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
     )
 
-    pascal_format_bbox = np.vstack((x_min, y_min, x_max, y_max)).T
-    return pascal_format_bbox
-
-
-def pascal_to_yolo_format(pascal_bbox, img_h, img_w):
-    x_min, y_min, x_max, y_max = pascal_bbox.T
-
-    x_min, y_min, x_max, y_max = limit_bboxes(
-        x_min, y_min, x_max, y_max, img_w=img_w, img_h=img_h
+    train_transform = albu.Compose(
+        [
+            albu.RandomResizedCrop(
+                scale=(0.8, 1.0), height=img_size, width=img_size, p=1,
+            ),
+            albu.ShiftScaleRotate(
+                border_mode=cv2.BORDER_CONSTANT,
+                rotate_limit=10,
+                scale_limit=0,
+                p=0.5,
+                mask_value=255,
+            ),
+            albu.ImageCompression(quality_lower=60, quality_upper=100, p=0.5),
+            albu.Normalize(p=1),
+        ],
+        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
     )
 
-    x_central = (x_min + x_max) / 2 / img_w
-    y_central = (y_min + y_max) / 2 / img_h
-    w = (x_max - x_min) / img_w
-    h = (y_max - y_min) / img_h
-
-    yolo_format_bbox = np.vstack((x_central, y_central, w, h)).T
-    return yolo_format_bbox
+    return test_transform, train_transform
 
 
 class ImageFolder(Dataset):
@@ -75,13 +67,22 @@ class ImageFolder(Dataset):
 
 
 class ListDataset(Dataset):
+    """Read images, apply augmentation and preprocessing transformations.
+
+    Args:
+        list_path: path to file that contains train image paths
+        transform (albumentations.Compose): data transformation pipeline
+            (e.g. flip, scale, resize, etc.)
+        img_size: size of returned img
+        num_samples: number of samples in epoch
+    """
+
     def __init__(
-            self,
-            list_path: str,
-            transform,
-            img_size: int = 416,
-            max_objects: Optional[int] = None,
-            logger=None,
+        self,
+        list_path: str,
+        transform,
+        img_size: int = 416,
+        num_samples: Optional[int] = None,
     ):
 
         with open(list_path, "r") as file:
@@ -89,14 +90,13 @@ class ListDataset(Dataset):
 
         self.label_files = [
             path.replace("images", "labels")
-                .replace(".png", ".txt")
-                .replace(".jpg", ".txt")
+            .replace(".png", ".txt")
+            .replace(".jpg", ".txt")
             for path in self.img_files
         ]
         self.transform = transform
         self.img_size = img_size
-        self.logger = logger
-        self.max_objects = max_objects
+        self.max_objects = num_samples
 
     def __len__(self) -> int:
         if self.max_objects is None:
@@ -119,7 +119,7 @@ class ListDataset(Dataset):
             width_arr = bboxes[:, 2]
             height_arr = bboxes[:, 3]
 
-            """Check that we do not have bbox with zero height or width"""
+            """Check that we don't have bbox with zero height or width"""
             if all(width_arr > 0) and all(height_arr > 0):
                 pascal_format_bboxes = yolo_to_pascal_format(
                     yolo_bbox=bboxes, img_h=img_height, img_w=img_width
@@ -134,14 +134,19 @@ class ListDataset(Dataset):
                 img = transforms.ToTensor()(augmented["image"])
                 need_resize_image = False
 
-                targets = np.zeros((label_data.shape[0], 6))
-                targets[:, 2:] = pascal_to_yolo_format(
-                    pascal_bbox=np.array(augmented["bboxes"]),
-                    img_h=img_height,
-                    img_w=img_width,
-                )
-                targets[:, 1] = np.array(augmented["category_id"])
-                targets = torch.from_numpy(targets).type_as(img)
+                augmented_bboxes = augmented["bboxes"]
+
+                """Create `targets` array if we have bboxes in image after augmentations"""
+                if len(augmented_bboxes) > 0:
+                    targets = np.zeros((len(augmented_bboxes), 6))
+
+                    targets[:, 2:] = pascal_to_yolo_format(
+                        pascal_bbox=np.array(augmented_bboxes),
+                        img_h=img_height,
+                        img_w=img_width,
+                    )
+                    targets[:, 1] = np.array(augmented["category_id"])
+                    targets = torch.from_numpy(targets).type_as(img)
 
         if need_resize_image:
             img = transforms.ToTensor()(img)

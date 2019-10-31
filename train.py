@@ -5,13 +5,12 @@ import time
 import datetime
 import argparse
 import torch
-import albumentations as albu
 
 from models import Darknet
 from utils.logger import create_logger, Logger, tensorboard_log_train
 from utils.utils import load_classes, weights_init_normal
-from utils.datasets import ListDataset
-from utils.parse_config import parse_data_config
+from utils.datasets import ListDataset, get_transform
+from utils.parse_config import parse_data_config, get_constants
 from test import evaluate
 from terminaltables import AsciiTable
 from torch.utils.data import DataLoader
@@ -103,29 +102,18 @@ if __name__ == "__main__":
     if opt.pretrained_weights:
         print("load pretrained weights")
         if opt.pretrained_weights.endswith(".pth"):
+            """Load darknet weights"""
             model.load_state_dict(torch.load(opt.pretrained_weights))
         else:
+            """Load checkpoint weights"""
             model.load_darknet_weights(opt.pretrained_weights)
 
-    test_transform = albu.Compose(
-        [
-            albu.Resize(height=opt.img_size, width=opt.img_size, p=1),
-        ],
-        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
-    )
-    train_transform = albu.Compose(
-        [
-            albu.HorizontalFlip(p=0),
-            albu.Resize(height=opt.img_size, width=opt.img_size, p=1),
-        ],
-        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
-    )
+    train_transform, test_transform = get_transform(img_size=opt.img_size)
     dataset = ListDataset(
         list_path=train_path,
         transform=train_transform,
         img_size=opt.img_size,
-        max_objects=None,
-        logger=logger,
+        num_samples=None,
     )
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -136,27 +124,8 @@ if __name__ == "__main__":
         collate_fn=dataset.collate_fn,
     )
 
-    optimizer = torch.optim.Adam(model.parameters())
-
-    metrics = [
-        "grid_size",
-        "loss",
-        "x",
-        "y",
-        "w",
-        "h",
-        "conf",
-        "cls",
-        "cls_acc",
-        "recall50",
-        "recall75",
-        "precision",
-        "conf_obj",
-        "conf_noobj",
-    ]
-    formats = {m: "%.6f" for m in metrics}
-    formats["grid_size"] = "%2d"
-    formats["cls_acc"] = "%.2f%%"
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=0.005)
+    metrics, formats = get_constants()
 
     for epoch in range(opt.epochs):
         model.train()
@@ -220,8 +189,8 @@ if __name__ == "__main__":
                 epoch_batches_left = len(dataloader) - (batch_i + 1)
                 time_left = datetime.timedelta(
                     seconds=epoch_batches_left
-                    * (time.time() - start_time)
-                    / (batch_i + 1)
+                            * (time.time() - start_time)
+                            / (batch_i + 1)
                 )
                 log_str += f"\n---- ETA {time_left}\n"
 
