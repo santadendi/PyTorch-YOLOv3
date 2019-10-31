@@ -37,3 +37,27 @@ def parse_data_config(path: str) -> dict:
         key, value = line.split("=")
         options[key.strip()] = value.strip()
     return options
+
+
+def get_constants():
+    metrics = [
+        "grid_size",
+        "loss",
+        "x",
+        "y",
+        "w",
+        "h",
+        "conf",
+        "cls",
+        "cls_acc",
+        "recall50",
+        "recall75",
+        "precision",
+        "conf_obj",
+        "conf_noobj",
+    ]
+    formats = {m: "%.6f" for m in metrics}
+    formats["grid_size"] = "%2d"
+    formats["cls_acc"] = "%.2f%%"
+
+    return metrics, formats
