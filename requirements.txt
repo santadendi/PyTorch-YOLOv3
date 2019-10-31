@@ -7,3 +7,5 @@ tensorboard
 terminaltables
 pillow
 tqdm
+albumentations>=0.4
+

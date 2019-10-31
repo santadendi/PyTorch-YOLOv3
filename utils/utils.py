@@ -31,9 +31,99 @@ def weights_init_normal(m):
         torch.nn.init.constant_(m.bias.data, 0.0)
 
 
-def rescale_boxes(boxes, current_size, original_shape):
-    """ Rescales bounding boxes to the original shape """
-    orig_h, orig_w = original_shape
+def limit_bboxes(x_min, y_min, x_max, y_max, img_w, img_h):
+    """Slightly reduce bbox if it is on the edge of the image
+
+    This is necessary to prevent exceptions in albumentations like:
+        `ValueError: Expected x_max for bbox
+        [0.0033755000000000313, 0.33033349999999995, 1.0000005, 0.98823624, 60.0]
+        to be in the range [0.0, 1.0], got 1.0000005.`
+
+    """
+
+    x_min = np.clip(x_min, a_min=1, a_max=img_w - 1)
+    y_min = np.clip(y_min, a_min=1, a_max=img_h - 1)
+    x_max = np.clip(x_max, a_min=1, a_max=img_w - 1)
+    y_max = np.clip(y_max, a_min=1, a_max=img_h - 1)
+    return x_min, y_min, x_max, y_max
+
+
+def yolo_to_pascal_format(yolo_bbox, img_h, img_w):
+    """Convert bbox from `yolo` format to `pascal_voc` format
+
+    The `yolo` format
+        `[x, y, width, height]`, e.g. [0.1, 0.2, 0.3, 0.4];
+        `x`, `y` - normalized bbox center; `width`, `height` - normalized bbox width and height.
+    The `pascal_voc` format
+        `[x_min, y_min, x_max, y_max]`, e.g. [97, 12, 247, 212].
+
+    Args:
+        yolo_bbox (np.array): [x, y, width, height]
+        img_h (int): image height
+        img_w (int): image width
+
+    Returns:
+        `pascal_voc` format bboxes, e.g. `[x_min, y_min, x_max, y_max]`
+
+    """
+    x_central, y_central, w, h = yolo_bbox.T
+    x_min = (x_central - w / 2) * img_w
+    y_min = (y_central - h / 2) * img_h
+    x_max = (x_central + w / 2) * img_w
+    y_max = (y_central + h / 2) * img_h
+
+    x_min, y_min, x_max, y_max = limit_bboxes(
+        x_min, y_min, x_max, y_max, img_w=img_w, img_h=img_h
+    )
+
+    pascal_format_bbox = np.vstack((x_min, y_min, x_max, y_max)).T
+    return pascal_format_bbox
+
+
+def pascal_to_yolo_format(pascal_bbox, img_h, img_w):
+    """Convert bbox from `pascal_voc` format to `yolo` format
+
+    The `yolo` format
+        `[x, y, width, height]`, e.g. [0.1, 0.2, 0.3, 0.4];
+        `x`, `y` - normalized bbox center; `width`, `height` - normalized bbox width and height.
+    The `pascal_voc` format
+        `[x_min, y_min, x_max, y_max]`, e.g. [97, 12, 247, 212].
+
+    Args:
+        pascal_bbox (np.array): [x_min, y_min, x_max, y_max]
+        img_h (int): image height
+        img_w (int): image width
+
+    Returns:
+        `yolo` format bboxes, e.g. `[x, y, width, height]`
+
+    """
+    x_min, y_min, x_max, y_max = pascal_bbox.T
+
+    x_min, y_min, x_max, y_max = limit_bboxes(
+        x_min, y_min, x_max, y_max, img_w=img_w, img_h=img_h
+    )
+
+    x_central = (x_min + x_max) / 2 / img_w
+    y_central = (y_min + y_max) / 2 / img_h
+    w = (x_max - x_min) / img_w
+    h = (y_max - y_min) / img_h
+
+    yolo_format_bbox = np.vstack((x_central, y_central, w, h)).T
+    return yolo_format_bbox
+
+
+def rescale_boxes(boxes, current_size, original_size):
+    """Rescales bounding boxes to the original shape
+
+    Args:
+        boxes (list(torch.Tensor)): Each torch.Tensor has shape = (N, 7) where N - number of bbox in img.
+            Each bbox looks like: (x1, y1, x2, y2, object_conf, class_score, class_label)
+        current_size: the size of the image that we use for model prediction
+        original_size: original image size
+
+    """
+    orig_h, orig_w = original_size
     boxes = boxes.clone()
 
     boxes[:, 0] = (boxes[:, 0] / current_size) * orig_w

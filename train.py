@@ -19,7 +19,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=10, help="number of epochs")
     parser.add_argument(
-        "--batch_size", type=int, default=12, help="size of each image batch"
+        "--batch_size", type=int, default=8, help="size of each image batch"
     )
     parser.add_argument(
         "--gradient_accumulations",
@@ -66,7 +66,7 @@ if __name__ == "__main__":
         help="interval evaluations on validation set",
     )
     parser.add_argument(
-        "--print_every", type=int, default=200, help="metric printing interval"
+        "--print_every", type=int, default=100, help="metric printing interval"
     )
     parser.add_argument(
         "--compute_map", default=False, help="if True computes mAP every tenth batch"
@@ -209,7 +209,7 @@ if __name__ == "__main__":
                 conf_thres=0.5,
                 nms_thres=0.5,
                 img_size=opt.img_size,
-                batch_size=8,
+                batch_size=12,
             )
             evaluation_metrics = [
                 ("val_precision", precision.mean()),
