@@ -1,5 +1,25 @@
-# PyTorch-YOLOv3
-A minimal PyTorch implementation of YOLOv3, with support for training, inference and evaluation.
+# PyTorch YOLOv3
+A PyTorch implementation of YOLOv3 Object Detection, with support for training, inference and evaluation.
+
+Also added support for image augmentation using albumentations package.
+
+## Differences from the original repository
+ * added support for image augmentation using albumentations
+ * added demo notebook - 
+ * code refactoring
+ * code formatting using black
+ * added descriptions for some functions
+ 
+
+## Table of Contents
+- [PyTorch YOLOv3](#pytorch-yolov3)
+  * [Table of Contents](#table-of-contents)
+  * [Installation](#installation)
+  * [Test](#test)
+  * [Inference](#inference)
+  * [Train](#train)
+  * [Train on Custom Dataset](#train_on_custom_dataset)
+  * [Credit](#credit)
 
 ## Installation
 ##### Clone and install requirements
