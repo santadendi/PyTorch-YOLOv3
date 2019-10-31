@@ -11,3 +11,6 @@ weights/*.weights
 __pycache__
 checkpoints
 .idea
+notebooks/.ipynb_checkpoints
+notebooks/output
+tensorboard_logs
