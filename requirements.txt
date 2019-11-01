@@ -8,4 +8,5 @@ terminaltables
 pillow
 tqdm
 albumentations>=0.4
+opencv
 
