@@ -27,7 +27,6 @@ if __name__ == "__main__":
     parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")
     parser.add_argument("--checkpoint_interval", type=int, default=1, help="interval between saving model weights")
     parser.add_argument("--evaluation_interval", type=int, default=1, help="interval evaluations on validation set")
-    parser.add_argument("--compute_map", default=False, help="if True computes mAP every tenth batch")
     parser.add_argument("--print_every", type=int, default=100, help="metric printing interval")
     opt = parser.parse_args()
     print(opt)
@@ -54,16 +53,19 @@ if __name__ == "__main__":
     model.apply(weights_init_normal)
 
     """If specified we start from checkpoint"""
+    darknet_pretrained = False
     if opt.pretrained_weights:
         print("load pretrained weights")
         if opt.pretrained_weights.endswith(".pth"):
             """Load darknet weights"""
             model.load_state_dict(torch.load(opt.pretrained_weights))
+            darknet_pretrained = True
         else:
             """Load checkpoint weights"""
             model.load_darknet_weights(opt.pretrained_weights)
 
-    train_transform, test_transform = get_transform(img_size=opt.img_size)
+    train_transform, test_transform = get_transform(img_size=opt.img_size,
+                                                    darknet_pretrained=darknet_pretrained)
     dataset = ListDataset(
         list_path=train_path,
         transform=train_transform,

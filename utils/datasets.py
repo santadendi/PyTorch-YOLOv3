@@ -21,17 +21,23 @@ def resize(image, size):
     return image
 
 
-def get_transform(img_size):
-    """Initializes and returns data transformation pipeline"""
-    test_transform = albu.Compose(
-        [albu.Resize(height=img_size, width=img_size, p=1), albu.Normalize(p=1)],
-        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
-    )
+def get_transform(img_size: int, darknet_pretrained: bool = False):
+    """Initializes and returns data transformation pipeline
+
+    Args:
+        img_size (int): image size
+        darknet_pretrained (bool): if you use a pre-trained darknet model, you need to disable image normalization
+
+    """
+
+    normalize = albu.Normalize(p=1)
+    if darknet_pretrained:
+        normalize = albu.Normalize(p=0)
 
     train_transform = albu.Compose(
         [
             albu.RandomResizedCrop(
-                scale=(0.8, 1.0), height=img_size, width=img_size, p=1,
+                scale=(0.9, 1.0), height=img_size, width=img_size, p=1,
             ),
             albu.ShiftScaleRotate(
                 border_mode=cv2.BORDER_CONSTANT,
@@ -41,12 +47,19 @@ def get_transform(img_size):
                 mask_value=255,
             ),
             albu.ImageCompression(quality_lower=60, quality_upper=100, p=0.5),
-            albu.Normalize(p=1),
+            normalize,
         ],
         bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
     )
 
-    return test_transform, train_transform
+    test_transform = albu.Compose(
+        [albu.Resize(height=img_size, width=img_size, p=1),
+         normalize
+         ],
+        bbox_params=albu.BboxParams(format="pascal_voc", label_fields=["category_id"]),
+    )
+
+    return train_transform, test_transform
 
 
 class ImageFolder(Dataset):

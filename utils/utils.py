@@ -265,8 +265,6 @@ def get_batch_statistics(outputs, targets, iou_threshold):
                     detected_boxes += [box_index]
         batch_metrics.append([true_positives, pred_scores, pred_labels])
 
-    if len(batch_metrics) == 0:
-        batch_metrics.append([np.zeros(1), torch.zeros(1), torch.zeros(1)])
     return batch_metrics
 
 
