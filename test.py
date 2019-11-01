@@ -66,9 +66,13 @@ def evaluate(
         )
 
     # Concatenate sample statistics
-    true_positives, pred_scores, pred_labels = [
-        np.concatenate(x, 0) for x in list(zip(*sample_metrics))
-    ]
+    if sample_metrics:
+        true_positives, pred_scores, pred_labels = [
+            np.concatenate(x, 0) for x in list(zip(*sample_metrics))
+        ]
+    else:
+        true_positives, pred_scores, pred_labels = [np.zeros(1), np.zeros(1), np.zeros(1)]
+
     precision, recall, AP, f1, ap_class = ap_per_class(
         true_positives, pred_scores, pred_labels, labels
     )
