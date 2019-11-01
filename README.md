@@ -1,10 +1,10 @@
 # PyTorch YOLOv3
 A PyTorch implementation of YOLOv3 Object Detection, with support for training, inference and evaluation.
 
-Also added support for image augmentation using albumentations package.
+Also added support for image augmentation using [`albumentations`](https://github.com/albu/albumentations) package.
 
 ## Improvements
- * added support for image augmentation using albumentations
+ * added support for image augmentation using [`albumentations`](https://github.com/albu/albumentations)
  * added demo notebook - [`yolo_with_albumentations_demo.ipynb`](https://github.com/santadendi/PyTorch-YOLOv3/blob/master/notebooks/yolo_with_albumentations_demo.ipynb)
  * code refactoring
  * code formatting using [`black`](https://github.com/psf/black)
