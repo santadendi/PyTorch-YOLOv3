@@ -142,8 +142,8 @@ class ListDataset(Dataset):
 
                     targets[:, 2:] = pascal_to_yolo_format(
                         pascal_bbox=np.array(augmented_bboxes),
-                        img_h=img_height,
-                        img_w=img_width,
+                        img_h=self.img_size,
+                        img_w=self.img_size,
                     )
                     targets[:, 1] = np.array(augmented["category_id"])
                     targets = torch.from_numpy(targets).type_as(img)
